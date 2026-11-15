@@ -7,6 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
+const APP_VERSION = '1.1.0';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -787,6 +788,7 @@ function settingsView() {
         <p class="muted" style="margin:0">הורדה של כל המתכונים והרשימות שלך לקובץ אחד.</p>
         <div class="row"><button class="btn" type="button" id="exp">הורדת גיבוי</button></div></section>
       <div class="row"><button class="btn danger" type="button" id="out">יציאה מהחשבון</button></div>
+      <p class="muted" style="margin:0;font-size:.85rem">גרסה ${APP_VERSION}</p>
     </div>`;
   $('#pf').onsubmit = async (e) => {
     e.preventDefault();
@@ -849,6 +851,23 @@ async function importData(data, status) {
   LS.set('import-dismissed', true);
 }
 
+/* ---------- updates: the service worker always fetches fresh files; this tells an open app that a newer version exists ---------- */
+let updateShown = false;
+async function checkVersion() {
+  if (updateShown || !navigator.onLine) return;
+  try {
+    const v = (await (await fetch('version.json?t=' + Date.now(), { cache: 'no-store' })).json()).version;
+    if (!v || v === APP_VERSION) return;
+    updateShown = true;
+    const b = document.createElement('div'); b.className = 'offline'; b.style.background = 'var(--basil)'; b.style.cursor = 'pointer';
+    b.textContent = 'יש גרסה חדשה. לחצו לעדכון';
+    b.onclick = async () => { try { const r = await navigator.serviceWorker?.getRegistration(); await r?.update(); } catch (e) {} location.reload(); };
+    document.body.append(b);
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(); });
+setInterval(checkVersion, 30 * 60 * 1000);
+
 /* ---------- routing ---------- */
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
@@ -890,4 +909,5 @@ if (sb) sb.auth.onAuthStateChange((event, session) => {
 });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 boot();
+checkVersion();
 })();
