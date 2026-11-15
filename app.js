@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -805,13 +805,14 @@ function claudeView() {
     <section class="card stack">
       <h2 style="margin:0;font-size:1.2rem">הוספה (פעם אחת)</h2>
       <ol style="margin:0;padding-inline-start:1.3em;display:grid;gap:6px">
-        <li>פותחים את <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">ההגדרות של Claude ← Connectors</a> (מהמחשב או מהדפדפן בטלפון).</li>
-        <li>לוחצים על <b>Add custom connector</b>.</li>
+        <li>פותחים את <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">Claude ← Customize ← Connectors</a> (מהמחשב או מהדפדפן בטלפון).</li>
+        <li>לוחצים על <b>Add</b> ואז <b>Add custom connector</b>.</li>
         <li>בשם כותבים <b>המטבח</b>, ובכתובת מדביקים את הכתובת הזאת:
           <input class="link-field" dir="ltr" readonly value="${esc(MCP_URL)}" style="margin-top:6px">
           <div class="row" style="margin-top:6px"><button class="btn" type="button" id="cp">העתקת הכתובת</button></div></li>
         <li>לוחצים <b>Add</b> ואז <b>Connect</b>. ייפתח מסך של המטבח: מתחברים (אם צריך) ולוחצים <b>אישור</b>.</li>
         <li>בשיחה חדשה ב־Claude מוודאים שהמחבר "המטבח" מופעל (בתפריט הכלים של השיחה).</li>
+        <li>רשות: כדי ש־Claude לא יבקש אישור לפני כל פעולה, בהגדרות המחבר משנים את הכלים מ־Needs approval ל־Always allow.</li>
       </ol>
       <p class="muted" style="margin:0;font-size:.9rem">Claude עובד על החשבון שלך ב־Claude, והחיבור לא עולה כסף. כל אחד מחבר את החשבון שלו ורואה רק את המטבח שלו ואת מה ששיתפו איתו.</p>
     </section>`;
