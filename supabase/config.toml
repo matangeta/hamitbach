@@ -1,0 +1,11 @@
+# Settings applied in the Supabase dashboard for this project (kept here for reference / CLI use)
+[auth]
+site_url = "https://matangeta.github.io/hamitbach"
+
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/oauth/consent"
+allow_dynamic_registration = true
+
+[functions.kitchen-mcp]
+verify_jwt = false

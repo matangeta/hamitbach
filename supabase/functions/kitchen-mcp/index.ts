@@ -233,7 +233,7 @@ async function rpc(c: Ctx | null, msg: any) {
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
-  if (url.pathname.endsWith('/.well-known/oauth-protected-resource')) return json(resourceMetadata());
+  if (url.pathname.endsWith('/oauth-protected-resource')) return json(resourceMetadata());
   if (req.method === 'GET') {
     if (req.headers.get('accept')?.includes('text/event-stream')) return new Response('SSE not supported', { status: 405, headers: CORS });
     return json({ name: 'המטבח MCP', version: VERSION, mcp: FN_URL });

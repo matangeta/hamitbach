@@ -1,5 +1,5 @@
 // App shell: network first, cache fallback (fresh when online, opens offline). Supabase calls are never cached.
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const CACHE = 'hamitbach-' + VERSION;
 const SHELL = ['./', 'index.html', 'app.js', 'config.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'vendor/supabase.js', 'vendor/marked.js', 'vendor/purify.js'];
