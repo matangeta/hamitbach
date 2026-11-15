@@ -33,6 +33,7 @@ const ICONS = {
   wishlist: '<svg viewBox="0 0 24 24"><rect x="3.5" y="9" width="17" height="11" rx="1.5"/><path d="M2.5 9h19M12 9v11M12 9c-2-4-6-4-6-1.5S10 9 12 9c2 0 6-.5 6-1.5S14 5 12 9"/></svg>',
   restaurants: '<svg viewBox="0 0 24 24"><path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 21V3c-2 1-3 4-3 8h3"/></svg>',
   share: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 7.5a3 3 0 1 1 0 6M21 20c0-2.6-1.6-4.8-4-5.6"/></svg>',
+  claude: '<svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
 const SCOPES = { recipes: 'מתכונים', shopping: 'רשימת קניות', wishlist: 'דברים שאני רוצה לקנות', restaurants: 'מסעדות' };
@@ -284,6 +285,7 @@ async function home() {
       ['#/list/shopping', 'shopping', 'רשימת קניות', n('shopping') != null ? (n('shopping') ? `נשארו ${n('shopping')} לקנות` : 'הכול נקנה') : ''],
       ['#/list/wishlist', 'wishlist', 'דברים שאני רוצה לקנות', n('wishlist') != null ? (n('wishlist') ? `${n('wishlist')} פריטים` : 'ריקה כרגע') : ''],
       ['#/list/restaurants', 'restaurants', 'מסעדות', n('restaurants') != null ? (n('restaurants') ? `${n('restaurants')} מסעדות` : 'עוד אין מסעדות') : '', 'wide'],
+      ['#/claude', 'claude', 'חיבור ל־Claude', 'לשמור מתכונים ולעדכן רשימות מתוך Claude', 'share'],
       ['#/share', 'share', 'שיתוף', sharers.length ? `${sharers.map(nameOf).join(', ')} ${sharers.length === 1 ? 'משתף' : 'משתפים'} איתך` : 'לשתף מתכונים ורשימות עם אחרים', 'share'],
     ];
     app.innerHTML = `<header class="home-head"><div class="home-top"><h1>${ICON_SVG} המטבח${name ? ' של ' + esc(name) : ''}</h1><span class="spacer"></span>
@@ -770,6 +772,52 @@ async function shareView() {
   try { await loadShares(); draw(); } catch (e) {}
 }
 
+
+/* ---------- OAuth consent (Claude connector sign-in through Supabase's OAuth server) ---------- */
+const MCP_URL = (CFG.supabaseUrl || '') + '/functions/v1/kitchen-mcp';
+async function consentView(authId) {
+  document.title = 'חיבור ל־Claude';
+  current.refresh = null;
+  app.innerHTML = `<div class="auth"><h1>${ICON_SVG} המטבח</h1><div class="card stack" id="c"><p class="loading">טוען…</p></div></div>`;
+  const box = $('#c');
+  let d;
+  try { d = must(await sb.auth.oauth.getAuthorizationDetails(authId)); }
+  catch (e) { box.innerHTML = `<p class="err">הבקשה לא תקפה או שפג תוקפה. נסו להתחבר שוב מ־Claude.</p><p class="muted">${esc(e.message || '')}</p>`; return; }
+  if (d && d.redirect_url && !d.authorization_id) { location.assign(d.redirect_url); return; }
+  const client = (d.client && (d.client.name || d.client.client_name)) || 'Claude';
+  box.innerHTML = `<h2 style="margin:0">לאשר ל־${esc(client)} גישה למטבח שלך?</h2>
+    <p class="muted" style="margin:0">${esc(client)} יוכל לקרוא ולהוסיף מתכונים, ולנהל את רשימת הקניות, המשאלות והמסעדות שלך ושל מי שמשתף איתך, בשם <b dir="ltr">${esc(S.user.email)}</b>.</p>
+    <p class="muted" style="margin:0;font-size:.85rem">אפשר לבטל את החיבור בכל רגע בהגדרות של Claude.</p>
+    <div class="row"><button class="btn primary" id="ok" type="button">אישור</button><button class="btn" id="no" type="button">ביטול</button></div><p class="err" id="err"></p>`;
+  const act = async (fn) => {
+    box.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try { const r = must(await fn(authId, { skipBrowserRedirect: true })); if (r && r.redirect_url) location.assign(r.redirect_url); }
+    catch (e) { $('#err').textContent = 'לא הצלחתי: ' + (e.message || e); box.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
+  };
+  $('#ok').onclick = () => act((id, o) => sb.auth.oauth.approveAuthorization(id, o));
+  $('#no').onclick = () => act((id, o) => sb.auth.oauth.denyAuthorization(id, o));
+}
+function claudeView() {
+  document.title = 'חיבור ל־Claude';
+  current.refresh = null;
+  app.innerHTML = backBar('#/', 'ראשי') + `<h1 class="page-title">חיבור ל־Claude</h1>
+    <p>אחרי החיבור אפשר לשלוח ל־Claude מתכון (טקסט, צילום מסך או קישור) ולבקש "תשמור במטבח", להגיד "תוסיף חלב לרשימת הקניות", או לשאול "מה אפשר להכין עם מה שיש לי?". Claude קורא ומעדכן את המטבח שלך ישירות, גם מהטלפון.</p>
+    <section class="card stack">
+      <h2 style="margin:0;font-size:1.2rem">הוספה (פעם אחת)</h2>
+      <ol style="margin:0;padding-inline-start:1.3em;display:grid;gap:6px">
+        <li>פותחים את <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">ההגדרות של Claude ← Connectors</a> (מהמחשב או מהדפדפן בטלפון).</li>
+        <li>לוחצים על <b>Add custom connector</b>.</li>
+        <li>בשם כותבים <b>המטבח</b>, ובכתובת מדביקים את הכתובת הזאת:
+          <input class="link-field" dir="ltr" readonly value="${esc(MCP_URL)}" style="margin-top:6px">
+          <div class="row" style="margin-top:6px"><button class="btn" type="button" id="cp">העתקת הכתובת</button></div></li>
+        <li>לוחצים <b>Add</b> ואז <b>Connect</b>. ייפתח מסך של המטבח: מתחברים (אם צריך) ולוחצים <b>אישור</b>.</li>
+        <li>בשיחה חדשה ב־Claude מוודאים שהמחבר "המטבח" מופעל (בתפריט הכלים של השיחה).</li>
+      </ol>
+      <p class="muted" style="margin:0;font-size:.9rem">Claude עובד על החשבון שלך ב־Claude, והחיבור לא עולה כסף. כל אחד מחבר את החשבון שלו ורואה רק את המטבח שלו ואת מה ששיתפו איתו.</p>
+    </section>`;
+  $('#cp').onclick = () => copyText(MCP_URL, 'הכתובת הועתקה');
+}
+
 /* ---------- settings: profile, import, export ---------- */
 function settingsView() {
   document.title = 'הגדרות';
@@ -875,13 +923,16 @@ function route() {
   // Supabase auth redirects put tokens in the hash; leave those to the client
   if (/access_token=|error_description=|type=recovery/.test(location.hash)) return;
   if (parts[0] === 'p' && parts[1]) return publicView(parts[1]);
-  if (!S.user) return authView();
+  const authId = new URLSearchParams(location.search).get('authorization_id');
+  if (!S.user) return authView('in', authId ? 'כדי לחבר את Claude, קודם נכנסים לחשבון.' : '');
+  if (authId) return consentView(authId);
   if (parts[0] === 'recipes') return recipesView();
   if (parts[0] === 'new') return editView(null);
   if (parts[0] === 'r' && parts[1]) return parts[2] === 'edit' ? editView(parts[1]) : recipeView(parts[1]);
   if (parts[0] === 'list' && LIST_TITLE[parts[1]]) return listView(parts[1]);
   if (parts[0] === 'share') return shareView();
   if (parts[0] === 'settings') return settingsView();
+  if (parts[0] === 'claude') return claudeView();
   return home();
 }
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); route(); });
