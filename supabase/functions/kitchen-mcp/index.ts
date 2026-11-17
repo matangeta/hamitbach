@@ -7,7 +7,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const FN_URL = `${SUPABASE_URL}/functions/v1/kitchen-mcp`;
 const APP_URL = 'https://matangeta.github.io/hamitbach/';
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const TAGS = ['קיטו', 'מנקנקת'];
 const TAG_HELP = 'Recipe tags: "קיטו" = keto / low-carb; "מנקנקת" = needs a sausage stuffer (filling casings: sausages, kabanos, salami, etc.).';
 
@@ -112,6 +112,12 @@ const TOOLS = [
   },
 ];
 
+// clients with an older cached schema may send tags as a JSON string or "a, b"
+const normTags = (v: unknown): string[] => {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === 'string') { try { const j = JSON.parse(v); if (Array.isArray(j)) return j.map(String); } catch { /* not JSON */ } return v.split(/[,،]/).map((t) => t.trim()).filter(Boolean); }
+  return [];
+};
 const EXTRA_KEYS = ['price', 'cuisine', 'area', 'order', 'rating'];
 type Ctx = { sb: SupabaseClient; uid: string };
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] });
@@ -150,7 +156,7 @@ async function call(c: Ctx, name: string, a: any) {
     }
     case 'save_recipe': {
       const owner = await ownerId(c, a.owner_email);
-      const row = must(await c.sb.from('recipes').insert({ owner_id: owner, title: a.title, category: CATS.includes(a.category) ? a.category : 'אחר', body: a.body, tags: [...new Set([...(a.tags || []).filter((t: string) => TAGS.includes(t)), ...(a.keto ? ['קיטו'] : [])])] }).select('id').single()) as any;
+      const row = must(await c.sb.from('recipes').insert({ owner_id: owner, title: a.title, category: CATS.includes(a.category) ? a.category : 'אחר', body: a.body, tags: [...new Set([...normTags(a.tags).filter((t: string) => TAGS.includes(t)), ...(a.keto ? ['קיטו'] : [])])] }).select('id').single()) as any;
       return text(`נשמר: "${a.title}". ${recipeLink(row.id)}`);
     }
     case 'update_recipe': {
@@ -158,7 +164,7 @@ async function call(c: Ctx, name: string, a: any) {
       if (!cur) return errText('Recipe not found.');
       const patch: any = {};
       for (const k of ['title', 'category', 'body']) if (a[k] !== undefined) patch[k] = a[k];
-      if (a.tags !== undefined) patch.tags = [...new Set([...(cur.tags || []).filter((t: string) => !TAGS.includes(t)), ...a.tags.filter((t: string) => TAGS.includes(t))])];
+      if (a.tags !== undefined) patch.tags = [...new Set([...(cur.tags || []).filter((t: string) => !TAGS.includes(t)), ...normTags(a.tags).filter((t: string) => TAGS.includes(t))])];
       if (a.keto !== undefined) patch.tags = (patch.tags || cur.tags || []).filter((t: string) => t !== 'קיטו').concat(a.keto ? ['קיטו'] : []);
       const rows = must(await c.sb.from('recipes').update(patch).eq('id', a.id).select('id')) as any[];
       if (!rows.length) return errText('No permission to edit this recipe.');
