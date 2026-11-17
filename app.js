@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -34,6 +34,7 @@ const ICONS = {
   restaurants: '<svg viewBox="0 0 24 24"><path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 21V3c-2 1-3 4-3 8h3"/></svg>',
   share: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 7.5a3 3 0 1 1 0 6M21 20c0-2.6-1.6-4.8-4-5.6"/></svg>',
   claude: '<svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>',
+  guides: '<svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/><path d="M6.5 8h2.5M6.5 11h2.5M15 8h2.5M15 11h2.5"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
 const SCOPES = { recipes: 'מתכונים', shopping: 'רשימת קניות', wishlist: 'דברים שאני רוצה לקנות', restaurants: 'מסעדות' };
@@ -44,6 +45,9 @@ const TAGS = { 'קיטו': '🥩', 'מנקנקת': '🌭' };
 // old recipes carry a "🥩 **קיטו**" style line in the text; once the real tag badge shows, hide that line
 const stripTagLines = (body, tags) => (body || '').replace(/^[^\S\n]*\S{1,2}[^\S\n]*\*\*([^*\n]+)\*\*[^\S\n]*(?:\n|$)/gm, (m, t) => ((tags || []).includes(t.trim()) ? '' : m));
 const tagLabel = (t) => (TAGS[t] || '🏷️') + ' ' + t;
+// guides live in the recipes table under this category, but get their own home tile and list
+const GUIDE_CAT = 'טיפים ומדריכים';
+const isGuide = (r) => (r.category || '') === GUIDE_CAT;
 const secLabel = (n) => (SEC_ICON[n] ? SEC_ICON[n] + ' ' : '') + n;
 
 /* ---------- session state ---------- */
@@ -287,9 +291,10 @@ async function home() {
     const n = (k) => counts && counts[k] != null ? counts[k] : null;
     const tiles = [
       ['#/recipes', 'recipes', 'מתכונים', n('recipes') != null ? `${n('recipes')} מתכונים` : '', 'main'],
+      ['#/guides', 'guides', 'מדריכים', n('guides') != null ? `${n('guides')} מדריכים וטיפים` : ''],
       ['#/list/shopping', 'shopping', 'רשימת קניות', n('shopping') != null ? (n('shopping') ? `נשארו ${n('shopping')} לקנות` : 'הכול נקנה') : ''],
       ['#/list/wishlist', 'wishlist', 'דברים שאני רוצה לקנות', n('wishlist') != null ? (n('wishlist') ? `${n('wishlist')} פריטים` : 'ריקה כרגע') : ''],
-      ['#/list/restaurants', 'restaurants', 'מסעדות', n('restaurants') != null ? (n('restaurants') ? `${n('restaurants')} מסעדות` : 'עוד אין מסעדות') : '', 'wide'],
+      ['#/list/restaurants', 'restaurants', 'מסעדות', n('restaurants') != null ? (n('restaurants') ? `${n('restaurants')} מסעדות` : 'עוד אין מסעדות') : ''],
       ['#/claude', 'claude', 'חיבור ל־Claude', 'לשמור מתכונים ולעדכן רשימות מתוך Claude', 'share'],
       ['#/share', 'share', 'שיתוף', sharers.length ? `${sharers.map(nameOf).join(', ')} ${sharers.length === 1 ? 'משתף' : 'משתפים'} איתך` : 'לשתף מתכונים ורשימות עם אחרים', 'share'],
     ];
@@ -311,9 +316,10 @@ async function home() {
     try {
       const q = (list, extra) => { let r = sb.from('items').select('id', { count: 'exact', head: true }).eq('owner_id', me()).eq('list', list); return extra ? extra(r) : r; };
       const [r, s, w, x] = await Promise.all([
-        sb.from('recipes').select('id', { count: 'exact', head: true }).eq('owner_id', me()),
+        sb.from('recipes').select('id', { count: 'exact', head: true }).eq('owner_id', me()).neq('category', GUIDE_CAT),
         q('shopping', (r) => r.eq('done', false).not('extra', 'cs', '{"note":true}')), q('wishlist', (r) => r.eq('done', false)), q('restaurants')]);
-      const counts = { recipes: r.count, shopping: s.count, wishlist: w.count, restaurants: x.count };
+      const g = await sb.from('recipes').select('id', { count: 'exact', head: true }).eq('owner_id', me()).eq('category', GUIDE_CAT);
+      const counts = { recipes: r.count, guides: g.count, shopping: s.count, wishlist: w.count, restaurants: x.count };
       if ([r, s, w, x].some((z) => z.error)) return;
       LS.set('home-counts', counts);
       if (location.hash === '' || location.hash === '#/' || location.hash === '#') draw(counts);
@@ -342,27 +348,29 @@ function categoriesOf(rows) {
   const used = [...new Set(rows.map((r) => r.category || 'אחר'))];
   return [...CAT_ORDER.filter((c) => used.includes(c)), ...used.filter((c) => !CAT_ORDER.includes(c)).sort()];
 }
-async function recipesView() {
-  document.title = 'מתכונים';
+async function recipesView(guides = false) {
+  document.title = guides ? 'מדריכים' : 'מתכונים';
   const owner = viewOwner('recipes');
   const editable = canEdit(owner, 'recipes');
-  app.innerHTML = backBar('#/', 'ראשי', editable ? '<a class="btn primary" href="#/new">+ מתכון חדש</a>' : '') +
-    `<h1 class="page-title">מתכונים</h1><div id="owners"></div>
-    <input type="search" class="search" id="q" placeholder="חיפוש מתכון או מצרך…" value="${esc(LS.get('recipe-q', ''))}">
+  const qKey = guides ? 'guide-q' : 'recipe-q';
+  app.innerHTML = backBar('#/', 'ראשי', editable ? `<a class="btn primary" href="#/new${guides ? '/guide' : ''}">+ ${guides ? 'מדריך חדש' : 'מתכון חדש'}</a>` : '') +
+    `<h1 class="page-title">${guides ? 'מדריכים וטיפים' : 'מתכונים'}</h1><div id="owners"></div>
+    <input type="search" class="search" id="q" placeholder="${guides ? 'חיפוש מדריך…' : 'חיפוש מתכון או מצרך…'}" value="${esc(LS.get(qKey, ''))}">
     <div class="chips" role="group" aria-label="סינון לפי קטגוריה"></div><div id="secs"><p class="loading">טוען…</p></div>`;
-  const oc = ownerChips('recipes', recipesView); if (oc) $('#owners').append(oc);
+  const oc = ownerChips('recipes', () => recipesView(guides)); if (oc) $('#owners').append(oc);
   if (owner !== me()) $('#owners').insertAdjacentHTML('beforeend', `<p class="ro-note">המתכונים של ${esc(nameOf(owner))}${editable ? '. יש לך הרשאת עריכה.' : '. אפשר לצפות ולשמור עותק אצלך.'}</p>`);
   let filter = LS.get('recipe-filter', ''), tag = LS.get('recipe-tag', '');
   const chips = $('.chips'), secs = $('#secs'), qi = $('#q');
-  let rows = cachedRecipes(owner);
+  let allRows = cachedRecipes(owner);
   const draw = () => {
-    if (!rows) return;
+    if (!allRows) return;
+    const rows = allRows.filter((r) => guides === isGuide(r));
     const cats = categoriesOf(rows);
-    if (!cats.includes(filter)) filter = '';
+    if (guides || !cats.includes(filter)) filter = '';
     const allTags = [...new Set(rows.flatMap((r) => r.tags || []))];
     if (!allTags.includes(tag)) tag = '';
     chips.innerHTML = '';
-    for (const name of ['', ...cats]) {
+    for (const name of guides ? [] : ['', ...cats]) {
       const c = document.createElement('button'); c.type = 'button'; c.className = 'chip';
       c.textContent = name ? secLabel(name) : '📖 הכול'; c.setAttribute('aria-pressed', String(name === filter));
       c.onclick = () => { filter = name; LS.set('recipe-filter', filter); draw(); };
@@ -387,11 +395,11 @@ async function recipesView() {
       sec.innerHTML = `<h2>${esc(secLabel(cat))}</h2><nav class="list">${list.map((r) => `<a href="#/r/${r.id}"><span>${esc(r.title)}${(r.tags || []).map((t) => ` <span class="badge">${esc(tagLabel(t))}</span>`).join('')}</span><span class="go" aria-hidden="true">‹</span></a>`).join('')}</nav>`;
       secs.append(sec);
     }
-    if (!shown) secs.innerHTML = `<p class="empty">${rows.length ? 'לא מצאתי מתכון מתאים.' : editable ? 'עוד אין כאן מתכונים. אפשר להוסיף מתכון חדש, או לייבא קובץ מההגדרות.' : 'עוד אין כאן מתכונים.'}</p>`;
+    if (!shown) secs.innerHTML = `<p class="empty">${rows.length ? (guides ? 'לא מצאתי מדריך מתאים.' : 'לא מצאתי מתכון מתאים.') : guides ? 'עוד אין כאן מדריכים.' : editable ? 'עוד אין כאן מתכונים. אפשר להוסיף מתכון חדש, או לייבא קובץ מההגדרות.' : 'עוד אין כאן מתכונים.'}</p>`;
   };
-  qi.oninput = () => { LS.set('recipe-q', qi.value); draw(); };
+  qi.oninput = () => { LS.set(qKey, qi.value); draw(); };
   draw();
-  current.refresh = async (what) => { if (what && what !== 'recipes' && what !== 'shares') return; try { rows = await loadRecipes(owner); draw(); } catch (e) { if (!rows) fail(e); } };
+  current.refresh = async (what) => { if (what && what !== 'recipes' && what !== 'shares') return; try { allRows = await loadRecipes(owner); draw(); } catch (e) { if (!allRows) fail(e); } };
   await current.refresh();
 }
 
@@ -457,7 +465,7 @@ async function recipeView(id) {
   const mine = r.owner_id === me(), editable = canEdit(r.owner_id, 'recipes');
   const view = renderRecipeBody(r, {
     key: r.id,
-    back: '<a class="btn" href="#/recipes">→ מתכונים</a>',
+    back: isGuide(r) ? '<a class="btn" href="#/guides">→ מדריכים</a>' : '<a class="btn" href="#/recipes">→ מתכונים</a>',
     actions: `${editable ? `<a class="btn" href="#/r/${r.id}/edit">עריכה</a>` : ''}<button type="button" class="btn primary" id="share">שיתוף</button>`,
     note: mine ? '' : `<p class="ro-note" style="margin-top:10px">מתכון של ${esc(nameOf(r.owner_id))}. <button type="button" class="reset" id="copy-mine">שמירת עותק במתכונים שלי</button></p>`,
   });
@@ -525,13 +533,13 @@ async function publicView(token) {
 
 /* ---------- recipe editor ---------- */
 const TEMPLATE = '**כמות:** \n**זמן:** \n\n---\n\n## מצרכים\n- \n\n## הוראות\n1. \n';
-async function editView(id) {
-  let r = { title: '', category: LS.get('recipe-filter', '') || 'אחר', tags: [], body: TEMPLATE, owner_id: viewOwner('recipes') };
+async function editView(id, guide = false) {
+  let r = { title: '', category: guide ? GUIDE_CAT : (LS.get('recipe-filter', '') || 'אחר'), tags: [], body: TEMPLATE, owner_id: viewOwner('recipes') };
   if (id) { try { r = await findRecipe(id); } catch (e) { fail(e); return; } if (!r) return go('#/recipes'); }
   if (!canEdit(r.owner_id, 'recipes')) return go(id ? '#/r/' + id : '#/recipes');
-  document.title = id ? 'עריכת מתכון' : 'מתכון חדש';
+  document.title = id ? 'עריכה' : guide ? 'מדריך חדש' : 'מתכון חדש';
   const cats = [...new Set([...CAT_ORDER, ...categoriesOf(cachedRecipes(r.owner_id) || [])])];
-  app.innerHTML = backBar(id ? '#/r/' + id : '#/recipes', 'ביטול') + `
+  app.innerHTML = backBar(id ? '#/r/' + id : guide ? '#/guides' : '#/recipes', 'ביטול') + `
     <h1 class="page-title">${id ? 'עריכת מתכון' : 'מתכון חדש'}</h1>
     <form class="stack" id="f">
       <label class="field"><span>שם המתכון</span><input type="text" name="title" required value="${esc(r.title)}"></label>
@@ -560,7 +568,7 @@ async function editView(id) {
   const del = $('#del');
   if (del) { let armed = false; del.onclick = async () => {
     if (!armed) { armed = true; del.textContent = 'ללחוץ שוב כדי למחוק'; setTimeout(() => { armed = false; del.textContent = 'מחיקת המתכון'; }, 3000); return; }
-    try { must(await sb.from('recipes').delete().eq('id', id)); delete S.recipes[r.owner_id]; toast('המתכון נמחק'); go('#/recipes'); } catch (x) { fail(x); }
+    try { must(await sb.from('recipes').delete().eq('id', id)); delete S.recipes[r.owner_id]; toast('נמחק'); go(isGuide(r) ? '#/guides' : '#/recipes'); } catch (x) { fail(x); }
   }; }
   current.refresh = null;
 }
@@ -933,8 +941,9 @@ function route() {
   const authId = new URLSearchParams(location.search).get('authorization_id');
   if (!S.user) return authView('in', authId ? 'כדי לחבר את Claude, קודם נכנסים לחשבון.' : '');
   if (authId) return consentView(authId);
-  if (parts[0] === 'recipes') return recipesView();
-  if (parts[0] === 'new') return editView(null);
+  if (parts[0] === 'recipes') return recipesView(false);
+  if (parts[0] === 'guides') return recipesView(true);
+  if (parts[0] === 'new') return editView(null, parts[1] === 'guide');
   if (parts[0] === 'r' && parts[1]) return parts[2] === 'edit' ? editView(parts[1]) : recipeView(parts[1]);
   if (parts[0] === 'list' && LIST_TITLE[parts[1]]) return listView(parts[1]);
   if (parts[0] === 'share') return shareView();
