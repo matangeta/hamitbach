@@ -7,7 +7,9 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const FN_URL = `${SUPABASE_URL}/functions/v1/kitchen-mcp`;
 const APP_URL = 'https://matangeta.github.io/hamitbach/';
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+const TAGS = ['קיטו', 'מנקנקת'];
+const TAG_HELP = 'Recipe tags: "קיטו" = keto / low-carb; "מנקנקת" = needs a sausage stuffer (filling casings: sausages, kabanos, salami, etc.).';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -50,7 +52,7 @@ const TOOLS = [
   {
     name: 'search_recipes',
     description: 'Search the user\'s recipes (and recipes shared with them) by words in the title or text. Returns id, title and category. Call with no query to list everything.',
-    inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: CATS }, ...ownerParam, limit: { type: 'integer', default: 50 } } },
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: CATS }, tag: { type: 'string', enum: TAGS, description: TAG_HELP }, ...ownerParam, limit: { type: 'integer', default: 50 } } },
     annotations: { readOnlyHint: true, title: 'חיפוש מתכונים' },
   },
   {
@@ -66,14 +68,16 @@ const TOOLS = [
       title: { type: 'string', description: 'Short Hebrew title' },
       category: { type: 'string', enum: CATS },
       body: { type: 'string', description: 'Markdown body in the format described above' },
-      keto: { type: 'boolean', description: 'true if the recipe is keto / low-carb' },
+      keto: { type: 'boolean', description: 'true if the recipe is keto / low-carb (same as tag קיטו)' },
+      tags: { type: 'array', items: { type: 'string', enum: TAGS }, description: TAG_HELP },
       ...ownerParam } },
     annotations: { title: 'שמירת מתכון' },
   },
   {
     name: 'update_recipe',
-    description: 'Change an existing recipe (title, category, body or keto tag). Get it first with get_recipe and send the full new body.',
-    inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, title: { type: 'string' }, category: { type: 'string', enum: CATS }, body: { type: 'string' }, keto: { type: 'boolean' } } },
+    description: 'Change an existing recipe (title, category, body or tags). Get it first with get_recipe; when changing the body send the full new body. tags replaces the whole tag list.',
+    inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, title: { type: 'string' }, category: { type: 'string', enum: CATS }, body: { type: 'string' }, keto: { type: 'boolean' },
+      tags: { type: 'array', items: { type: 'string', enum: TAGS }, description: TAG_HELP } } },
     annotations: { title: 'עדכון מתכון' },
   },
   {
@@ -128,6 +132,7 @@ async function call(c: Ctx, name: string, a: any) {
       let q = c.sb.from('recipes').select('id,title,category,tags,owner_id').order('title').limit(Math.min(a.limit || 50, 300));
       if (a.owner_email) q = q.eq('owner_id', await ownerId(c, a.owner_email));
       if (a.category) q = q.eq('category', a.category);
+      if (a.tag) q = q.contains('tags', [a.tag]);
       if (a.query) { const s = String(a.query).replace(/[%,()]/g, ' ').trim(); q = q.or(`title.ilike.%${s}%,body.ilike.%${s}%`); }
       const rows = must(await q) as any[];
       if (!rows.length) return text('לא נמצאו מתכונים.');
@@ -141,11 +146,11 @@ async function call(c: Ctx, name: string, a: any) {
       if (!rows.length) return errText('Recipe not found.');
       if (rows.length > 1 && !a.id) return text('כמה מתכונים מתאימים, בחרו id:\n' + rows.map((r) => `${r.id} | ${r.title}`).join('\n'));
       const r = rows[0];
-      return text(`# ${r.title}\nid: ${r.id}\ncategory: ${r.category}\nlink: ${recipeLink(r.id)}\n\n${r.body}`);
+      return text(`# ${r.title}\nid: ${r.id}\ncategory: ${r.category}\ntags: ${(r.tags || []).join(', ') || '-'}\nlink: ${recipeLink(r.id)}\n\n${r.body}`);
     }
     case 'save_recipe': {
       const owner = await ownerId(c, a.owner_email);
-      const row = must(await c.sb.from('recipes').insert({ owner_id: owner, title: a.title, category: CATS.includes(a.category) ? a.category : 'אחר', body: a.body, tags: a.keto ? ['קיטו'] : [] }).select('id').single()) as any;
+      const row = must(await c.sb.from('recipes').insert({ owner_id: owner, title: a.title, category: CATS.includes(a.category) ? a.category : 'אחר', body: a.body, tags: [...new Set([...(a.tags || []).filter((t: string) => TAGS.includes(t)), ...(a.keto ? ['קיטו'] : [])])] }).select('id').single()) as any;
       return text(`נשמר: "${a.title}". ${recipeLink(row.id)}`);
     }
     case 'update_recipe': {
@@ -153,7 +158,8 @@ async function call(c: Ctx, name: string, a: any) {
       if (!cur) return errText('Recipe not found.');
       const patch: any = {};
       for (const k of ['title', 'category', 'body']) if (a[k] !== undefined) patch[k] = a[k];
-      if (a.keto !== undefined) patch.tags = (cur.tags || []).filter((t: string) => t !== 'קיטו').concat(a.keto ? ['קיטו'] : []);
+      if (a.tags !== undefined) patch.tags = [...new Set([...(cur.tags || []).filter((t: string) => !TAGS.includes(t)), ...a.tags.filter((t: string) => TAGS.includes(t))])];
+      if (a.keto !== undefined) patch.tags = (patch.tags || cur.tags || []).filter((t: string) => t !== 'קיטו').concat(a.keto ? ['קיטו'] : []);
       const rows = must(await c.sb.from('recipes').update(patch).eq('id', a.id).select('id')) as any[];
       if (!rows.length) return errText('No permission to edit this recipe.');
       return text(`עודכן. ${recipeLink(a.id)}`);
@@ -205,7 +211,7 @@ async function call(c: Ctx, name: string, a: any) {
 }
 
 const INSTRUCTIONS = `This connects to "המטבח", the user's personal kitchen app (${APP_URL}): recipes, shopping list, wishlist and restaurants. Answer the user in Hebrew unless they write in another language.
-- When the user sends a recipe (text, screenshot, photo of a page, or a link), read it yourself, rewrite it cleanly in Hebrew in the required format, and call save_recipe once. Then reply with the title and the link.
+- When the user sends a recipe (text, screenshot, photo of a page, or a link), read it yourself, rewrite it cleanly in Hebrew in the required format, and call save_recipe once. Add tags when they fit: קיטו (keto) and מנקנקת (needs a sausage stuffer). Then reply with the title and the link.
 - "תוסיף לרשימה / צריך לקנות" -> add_items list=shopping; "קניתי" -> get_list then update_items done=true.
 - To answer "what can I cook", use search_recipes and get_recipe.
 - Data shared by other users is reachable with owner_email.`;

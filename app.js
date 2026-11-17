@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -39,6 +39,9 @@ const ICONS = {
 const SCOPES = { recipes: 'מתכונים', shopping: 'רשימת קניות', wishlist: 'דברים שאני רוצה לקנות', restaurants: 'מסעדות' };
 const CAT_ORDER = ['פיצה', 'פסטה', 'אסייתי', 'בשר ועוף', 'שרקוטרי', 'דגים', 'מרקים', 'סלטים', 'מאפים', 'קינוחים וארוחות בוקר', 'רטבים, ממרחים ותוספות', 'כבישה ותסיסה', 'חטיפים ונשנושים', 'משקאות', 'טיפים ומדריכים', 'אחר'];
 const SEC_ICON = { 'פיצה': '🍕', 'אסייתי': '🍜', 'בשר ועוף': '🍗', 'שרקוטרי': '🥓', 'דגים': '🐟', 'מרקים': '🍲', 'סלטים': '🥗', 'מאפים': '🥐', 'קינוחים וארוחות בוקר': '🍰', 'רטבים, ממרחים ותוספות': '🫙', 'כבישה ותסיסה': '🥒', 'חטיפים ונשנושים': '🍿', 'משקאות': '🍹', 'טיפים ומדריכים': '💡', 'פסטה': '🍝', 'אחר': '🍽️' };
+// recipe tags: shown as badges and filter chips; the editor offers a checkbox for each
+const TAGS = { 'קיטו': '🥩', 'מנקנקת': '🌭' };
+const tagLabel = (t) => (TAGS[t] || '🏷️') + ' ' + t;
 const secLabel = (n) => (SEC_ICON[n] ? SEC_ICON[n] + ' ' : '') + n;
 
 /* ---------- session state ---------- */
@@ -365,7 +368,7 @@ async function recipesView() {
     }
     for (const t of allTags) {
       const c = document.createElement('button'); c.type = 'button'; c.className = 'chip tag';
-      c.textContent = '🥩 ' + t; c.setAttribute('aria-pressed', String(tag === t));
+      c.textContent = tagLabel(t); c.setAttribute('aria-pressed', String(tag === t));
       c.onclick = () => { tag = tag === t ? '' : t; LS.set('recipe-tag', tag); draw(); };
       chips.append(c);
     }
@@ -379,7 +382,7 @@ async function recipesView() {
       if (!list.length) continue;
       shown += list.length;
       const sec = document.createElement('section'); sec.className = 'sec';
-      sec.innerHTML = `<h2>${esc(secLabel(cat))}</h2><nav class="list">${list.map((r) => `<a href="#/r/${r.id}"><span>${esc(r.title)}${(r.tags || []).map((t) => ` <span class="badge">🥩 ${esc(t)}</span>`).join('')}</span><span class="go" aria-hidden="true">‹</span></a>`).join('')}</nav>`;
+      sec.innerHTML = `<h2>${esc(secLabel(cat))}</h2><nav class="list">${list.map((r) => `<a href="#/r/${r.id}"><span>${esc(r.title)}${(r.tags || []).map((t) => ` <span class="badge">${esc(tagLabel(t))}</span>`).join('')}</span><span class="go" aria-hidden="true">‹</span></a>`).join('')}</nav>`;
       secs.append(sec);
     }
     if (!shown) secs.innerHTML = `<p class="empty">${rows.length ? 'לא מצאתי מתכון מתאים.' : editable ? 'עוד אין כאן מתכונים. אפשר להוסיף מתכון חדש, או לייבא קובץ מההגדרות.' : 'עוד אין כאן מתכונים.'}</p>`;
@@ -408,6 +411,7 @@ function renderRecipeBody(r, opts) {
     </div>
     ${opts.note || ''}
     <h1 class="r-title">${esc(r.title)}</h1>
+    ${(r.tags || []).length ? `<p style="margin:0 0 6px">${r.tags.map((t) => `<span class="badge">${esc(tagLabel(t))}</span>`).join(' ')}</p>` : ''}
     <p class="hint" id="hint">לחצו על כמות כדי לשנות אותה, וכל שאר הכמויות יתעדכנו בהתאם. <button type="button" class="reset" id="reset" hidden>חזרה לכמות המקורית</button></p>
     <article class="content">${mdBlock(r.body)}</article>
     ${opts.foot || ''}`;
@@ -531,7 +535,7 @@ async function editView(id) {
       <label class="field"><span>שם המתכון</span><input type="text" name="title" required value="${esc(r.title)}"></label>
       <label class="field"><span>קטגוריה</span><select name="category">${cats.map((c) => `<option ${c === r.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="__new">+ קטגוריה חדשה…</option></select></label>
       <label class="field" id="newcat" hidden><span>שם הקטגוריה החדשה</span><input type="text" name="newcat"></label>
-      <div class="checks"><label><input type="checkbox" name="keto" ${(r.tags || []).includes('קיטו') ? 'checked' : ''}> קיטו</label></div>
+      <div class="checks">${Object.keys(TAGS).map((t) => `<label><input type="checkbox" name="tag" value="${esc(t)}" ${(r.tags || []).includes(t) ? 'checked' : ''}> ${esc(tagLabel(t))}</label>`).join('')}</div>
       <label class="field"><span>המתכון</span><textarea class="inp md" name="body" dir="rtl">${esc(r.body)}</textarea>
         <small>כותבים כמו בהודעה: כותרת עם ## בתחילת שורה, רשימה עם - , שלבים עם 1. . כמויות בחלק "מצרכים" ניתנות לשינוי אוטומטית.</small></label>
       <div class="row"><button class="btn primary" type="submit">שמירה</button>${id ? '<span class="spacer"></span><button class="btn danger" type="button" id="del">מחיקת המתכון</button>' : ''}</div>
@@ -541,7 +545,7 @@ async function editView(id) {
   f.onsubmit = async (e) => {
     e.preventDefault();
     const category = f.category.value === '__new' ? (f.newcat.value.trim() || 'אחר') : f.category.value;
-    const tags = (r.tags || []).filter((t) => t !== 'קיטו').concat(f.keto.checked ? ['קיטו'] : []);
+    const tags = (r.tags || []).filter((t) => !TAGS[t]).concat([...f.querySelectorAll('[name=tag]:checked')].map((c) => c.value));
     const row = { title: f.title.value.trim(), category, tags, body: f.body.value };
     try {
       let saved;
