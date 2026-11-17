@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -41,6 +41,8 @@ const CAT_ORDER = ['פיצה', 'פסטה', 'אסייתי', 'בשר ועוף', '�
 const SEC_ICON = { 'פיצה': '🍕', 'אסייתי': '🍜', 'בשר ועוף': '🍗', 'שרקוטרי': '🥓', 'דגים': '🐟', 'מרקים': '🍲', 'סלטים': '🥗', 'מאפים': '🥐', 'קינוחים וארוחות בוקר': '🍰', 'רטבים, ממרחים ותוספות': '🫙', 'כבישה ותסיסה': '🥒', 'חטיפים ונשנושים': '🍿', 'משקאות': '🍹', 'טיפים ומדריכים': '💡', 'פסטה': '🍝', 'אחר': '🍽️' };
 // recipe tags: shown as badges and filter chips; the editor offers a checkbox for each
 const TAGS = { 'קיטו': '🥩', 'מנקנקת': '🌭' };
+// old recipes carry a "🥩 **קיטו**" style line in the text; once the real tag badge shows, hide that line
+const stripTagLines = (body, tags) => (body || '').replace(/^[^\S\n]*\S{1,2}[^\S\n]*\*\*([^*\n]+)\*\*[^\S\n]*(?:\n|$)/gm, (m, t) => ((tags || []).includes(t.trim()) ? '' : m));
 const tagLabel = (t) => (TAGS[t] || '🏷️') + ' ' + t;
 const secLabel = (n) => (SEC_ICON[n] ? SEC_ICON[n] + ' ' : '') + n;
 
@@ -413,7 +415,7 @@ function renderRecipeBody(r, opts) {
     <h1 class="r-title">${esc(r.title)}</h1>
     ${(r.tags || []).length ? `<p style="margin:0 0 6px">${r.tags.map((t) => `<span class="badge">${esc(tagLabel(t))}</span>`).join(' ')}</p>` : ''}
     <p class="hint" id="hint">לחצו על כמות כדי לשנות אותה, וכל שאר הכמויות יתעדכנו בהתאם. <button type="button" class="reset" id="reset" hidden>חזרה לכמות המקורית</button></p>
-    <article class="content">${mdBlock(r.body)}</article>
+    <article class="content">${mdBlock(stripTagLines(r.body, r.tags))}</article>
     ${opts.foot || ''}`;
   const content = $('.content');
   prepare(content);
