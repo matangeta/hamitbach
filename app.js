@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -584,7 +584,7 @@ async function listView(list) {
   if (owner !== me()) $('#owners').insertAdjacentHTML('beforeend', `<p class="ro-note">הרשימה של ${esc(nameOf(owner))}${editable ? '. שינויים כאן מתעדכנים גם אצלו/ה.' : '. צפייה בלבד.'}</p>`);
   const body = $('#body');
   let rows = cachedItems(owner, list);
-  const ctx = { owner, list, editable, reload: async () => { rows = await loadItems(owner, list); draw(); }, rows: () => rows, local: (fn) => { fn(rows); draw(); } };
+  const ctx = { owner, list, editable, reload: async () => { rows = await loadItems(owner, list); if (list === 'shopping') normalizeShopping(ctx, rows); draw(); }, rows: () => rows, local: (fn) => { fn(rows); draw(); } };
   const draw = () => { if (rows) (list === 'shopping' ? drawShopping : list === 'wishlist' ? drawWishlist : drawRestaurants)(body, rows, ctx); };
   const add = $('#add'); if (add) add.onclick = () => itemSheet(ctx, null);
   draw();
@@ -597,65 +597,200 @@ async function saveItem(ctx, id, row) {
   await ctx.reload();
 }
 async function toggleDone(ctx, it, done) {
-  ctx.local(() => { it.done = done; });
-  try { must(await sb.from('items').update({ done }).eq('id', it.id)); } catch (e) { fail(e); ctx.local(() => { it.done = !done; }); }
+  const prev = { done: it.done, extra: it.extra };
+  const extra = { ...(it.extra || {}) };
+  if (ctx.list === 'shopping') { delete extra.trip; if (done) extra.bought_at = new Date().toISOString(); else delete extra.bought_at; }
+  ctx.local(() => { it.done = done; it.extra = extra; });
+  try { must(await sb.from('items').update({ done, extra }).eq('id', it.id)); } catch (e) { fail(e); ctx.local(() => { Object.assign(it, prev); }); }
+}
+
+/* ---------- shopping: today's list, history by day, everything ever bought ----------
+   extra.bought_at = when an item was ticked; extra.trip = the day (YYYY-MM-DD) it moved to history, or 'old'.
+   The open list = not bought yet + ticked today. Anything ticked on an earlier day is history automatically. */
+const SHOP_CUTOFF = Date.parse('2026-11-20T13:50:00Z'); // items ticked before the history feature carry no bought_at
+const dayKey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+const isNote = (r) => !!(r.extra && r.extra.note);
+const lastSec = (s) => (s || '').split(' · ').pop();
+const baseName = (t) => (t || '').replace(/\*\*/g, '').replace(/\s*\([^)]*\)/g, '').split(/\s+[–—-]\s+/)[0].trim();
+const nameKey = (t) => baseName(t).toLowerCase();
+function tripOf(r) { // '' = on the open list
+  if (!r.done) return '';
+  const x = r.extra || {};
+  if (x.trip) return x.trip;
+  const b = x.bought_at || r.updated_at;
+  if (!b) return 'old';
+  const d = dayKey(b);
+  return d === dayKey(Date.now()) ? '' : d;
+}
+function dayLabel(k) {
+  if (k === 'old') return 'קניות קודמות';
+  const [y, m, d] = k.split('-').map(Number), dt = new Date(y, m - 1, d);
+  const diff = Math.round((new Date(dayKey(Date.now()) + 'T00:00') - dt) / 864e5);
+  const w = dt.toLocaleDateString('he-IL', { weekday: 'long' });
+  return (diff === 1 ? 'אתמול, ' : '') + `${w}, ${d}.${m}${y !== new Date().getFullYear() ? '.' + y : ''}`;
+}
+// one-time fix-up of rows ticked without a timestamp (old app / old connector), so later edits don't move them
+function normalizeShopping(ctx, rows) {
+  if (!ctx.editable) return;
+  rows.filter((r) => r.done && !(r.extra && (r.extra.bought_at || r.extra.trip))).forEach((r) => {
+    const t = Date.parse(r.updated_at);
+    const extra = { ...(r.extra || {}), ...(t > SHOP_CUTOFF ? { bought_at: r.updated_at } : { trip: 'old' }) };
+    r.extra = extra;
+    sb.from('items').update({ extra }).eq('id', r.id).then(() => {}, () => {});
+  });
+}
+async function reAdd(ctx, title, section) {
+  try { await saveItem(ctx, null, { title, section: lastSec(section), position: Date.now() / 1000 }); toast('נוסף לרשימה'); } catch (e) { fail(e); }
 }
 
 function drawShopping(body, rows, ctx) {
+  const tab = LS.get('shop-tab', 'now');
+  const open = rows.filter((r) => tripOf(r) === '');
+  const past = rows.filter((r) => tripOf(r) !== '');
+  const left = open.filter((r) => !r.done && !isNote(r)).length;
+  const tabs = [['now', `לקנות${left ? ` (${left})` : ''}`], ['history', 'היסטוריה'], ['all', 'כל המצרכים']];
+  const keepFocus = document.activeElement && ['new-item', 'all-q'].includes(document.activeElement.id) ? document.activeElement.id : '';
+  body.innerHTML = `<div class="tabs chips">${tabs.map(([k, t]) => `<button type="button" class="chip" data-tab="${k}" aria-pressed="${k === tab}">${t}</button>`).join('')}</div><div id="shop"></div>`;
+  body.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { LS.set('shop-tab', b.dataset.tab); drawShopping(body, rows, ctx); }; });
+  const box = body.querySelector('#shop');
+  (tab === 'history' ? drawShopHistory : tab === 'all' ? drawShopAll : drawShopNow)(box, open, past, ctx);
+  if (keepFocus) { const el = body.querySelector('#' + keepFocus); if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); } }
+}
+
+function shopLi(ctx, it) {
+  const el = document.createElement('li'); el.classList.toggle('done', it.done);
+  el.innerHTML = `<label><input type="checkbox" ${it.done ? 'checked' : ''} ${ctx.editable ? '' : 'disabled'}><span>${mdInline(it.title)}${it.note ? ` <small class="muted">${esc(it.note)}</small>` : ''}</span></label>${ctx.editable ? '<button type="button" class="more" aria-label="עריכה">⋯</button>' : ''}`;
+  el.querySelector('input').onchange = (e) => toggleDone(ctx, it, e.target.checked);
+  const m = el.querySelector('.more'); if (m) m.onclick = () => itemSheet(ctx, it);
+  externalLinks(el);
+  return el;
+}
+
+function drawShopNow(box, rows, past, ctx) {
   const sections = [...new Set(rows.map((r) => r.section || ''))];
-  const keepFocus = document.activeElement && document.activeElement.id === 'new-item';
-  const left = rows.filter((r) => !r.done && !(r.extra && r.extra.note)).length;
-  const lastSec = LS.get('shop-sec', '');
-  body.innerHTML = `${ctx.editable ? `<form class="addrow" id="addf"><input type="text" id="new-item" placeholder="מה צריך לקנות?" autocomplete="off" enterkeyhint="done">
-      <select id="new-sec" aria-label="קטגוריה">${['', ...sections.filter(Boolean)].map((s) => `<option value="${esc(s)}" ${s === lastSec ? 'selected' : ''}>${s ? esc(s) : 'בלי קטגוריה'}</option>`).join('')}<option value="__new">+ חדשה…</option></select>
+  const known = [...new Set([...sections, ...past.filter((r) => !isNote(r)).map((r) => lastSec(r.section))].filter(Boolean))];
+  const left = rows.filter((r) => !r.done && !isNote(r)).length;
+  const ticked = rows.filter((r) => r.done && !isNote(r));
+  const lastS = LS.get('shop-sec', '');
+  box.innerHTML = `${ctx.editable ? `<form class="addrow" id="addf"><input type="text" id="new-item" placeholder="מה צריך לקנות?" autocomplete="off" enterkeyhint="done" list="shop-names">
+      <datalist id="shop-names">${[...new Set(past.filter((r) => !isNote(r)).map((r) => baseName(r.title)))].map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+      <select id="new-sec" aria-label="קטגוריה">${['', ...known].map((s) => `<option value="${esc(s)}" ${s === lastS ? 'selected' : ''}>${s ? esc(s) : 'בלי קטגוריה'}</option>`).join('')}<option value="__new">+ חדשה…</option></select>
       <button class="btn primary" type="submit">הוספה</button></form>` : ''}
     <div class="shop-bar"><output>${rows.length ? (left ? `נשארו ${left} לקנות` : 'הכול נקנה') : ''}</output><span class="spacer"></span>
-      ${ctx.editable && rows.some((r) => r.done) ? '<button type="button" class="reset" id="uncheck">ביטול כל הסימונים</button><button type="button" class="reset" id="purge">מחיקת מה שנקנה</button>' : ''}</div>
-    <div id="secs"></div><section class="bought" id="bought" hidden><h2>נקנו</h2><ul class="tasks"></ul></section>`;
-  const secs = body.querySelector('#secs'), bought = body.querySelector('#bought ul');
-  if (!rows.length) secs.innerHTML = '<p class="empty">הרשימה ריקה. מוסיפים פריט בשורה למעלה.</p>';
-  const li = (it) => {
-    const el = document.createElement('li'); el.classList.toggle('done', it.done);
-    el.innerHTML = `<label><input type="checkbox" ${it.done ? 'checked' : ''} ${ctx.editable ? '' : 'disabled'}><span>${mdInline(it.title)}${it.note ? ` <small class="muted">${esc(it.note)}</small>` : ''}</span></label>${ctx.editable ? '<button type="button" class="more" aria-label="עריכה">⋯</button>' : ''}`;
-    el.querySelector('input').onchange = (e) => toggleDone(ctx, it, e.target.checked);
-    const m = el.querySelector('.more'); if (m) m.onclick = () => itemSheet(ctx, it);
-    externalLinks(el);
-    return el;
-  };
-  // group by "group · section": a new h2 when the group part changes
+      ${ctx.editable && ticked.length ? '<button type="button" class="btn primary" id="finish">סיימתי לקנות ✓</button><button type="button" class="reset" id="uncheck">ביטול הסימונים</button>' : ''}</div>
+    ${ctx.editable && ticked.length ? '<p class="hint">מה שסימנתם היום נשאר כאן עד סוף היום, ואז עובר לבד להיסטוריה. "סיימתי לקנות" מעביר אותו כבר עכשיו.</p>' : ''}
+    <div id="secs"></div><section class="bought" id="bought" hidden><h2>נקנו היום</h2><ul class="tasks"></ul></section>`;
+  const secs = box.querySelector('#secs'), bought = box.querySelector('#bought ul');
+  if (!rows.length) secs.innerHTML = `<p class="empty">הרשימה ריקה. מוסיפים פריט בשורה למעלה${past.length ? ', או מחזירים משהו מ"כל המצרכים"' : ''}.</p>`;
   let lastGroup = null;
   for (const s of sections) {
     const items = rows.filter((r) => (r.section || '') === s);
-    const notes = items.filter((r) => r.extra && r.extra.note), open = items.filter((r) => !r.done && !(r.extra && r.extra.note));
+    const notes = items.filter(isNote), todo = items.filter((r) => !r.done && !isNote(r));
     const [group, sub] = s.includes(' · ') ? s.split(' · ') : ['', s];
     if (group && group !== lastGroup) { secs.insertAdjacentHTML('beforeend', `<h2>${esc(group)}</h2>`); }
     lastGroup = group;
-    if (!open.length && !notes.length) continue;
+    if (!todo.length && !notes.length) continue;
     if (sub) secs.insertAdjacentHTML('beforeend', `<h3>${esc(sub)}</h3>`);
     if (notes.length) { const ul = document.createElement('ul'); ul.className = 'notes'; notes.forEach((n) => { const l = document.createElement('li'); l.innerHTML = mdInline(n.title); if (ctx.editable) { l.style.cursor = 'pointer'; l.onclick = (e) => { if (!e.target.closest('a')) itemSheet(ctx, n); }; } externalLinks(l); ul.append(l); }); secs.append(ul); }
-    if (open.length) { const ul = document.createElement('ul'); ul.className = 'tasks'; open.forEach((it) => ul.append(li(it))); secs.append(ul); }
+    if (todo.length) { const ul = document.createElement('ul'); ul.className = 'tasks'; todo.forEach((it) => ul.append(shopLi(ctx, it))); secs.append(ul); }
   }
-  rows.filter((r) => r.done && !(r.extra && r.extra.note)).forEach((it) => bought.append(li(it)));
-  body.querySelector('#bought').hidden = !bought.children.length;
-  const f = body.querySelector('#addf');
+  ticked.forEach((it) => bought.append(shopLi(ctx, it)));
+  box.querySelector('#bought').hidden = !bought.children.length;
+  const f = box.querySelector('#addf');
   if (f) {
-    const sel = f.querySelector('#new-sec');
+    const sel = f.querySelector('#new-sec'), inp = f.querySelector('#new-item');
     sel.onchange = () => { if (sel.value === '__new') { const n = (prompt('שם הקטגוריה החדשה:') || '').trim(); if (n) { sel.insertAdjacentHTML('afterbegin', `<option value="${esc(n)}">${esc(n)}</option>`); sel.value = n; } else sel.value = ''; } LS.set('shop-sec', sel.value); };
+    // picking a name bought before fills in its usual category
+    inp.oninput = () => { const k = nameKey(inp.value); const hit = k && [...past].reverse().find((r) => nameKey(r.title) === k); if (hit && lastSec(hit.section) && known.includes(lastSec(hit.section))) sel.value = lastSec(hit.section); };
     f.onsubmit = async (e) => {
       e.preventDefault();
-      const inp = f.querySelector('#new-item'), t = inp.value.trim(); if (!t) return;
+      const t = inp.value.trim(); if (!t) return;
       inp.value = '';
-      try { await saveItem(ctx, null, { title: t, section: sel.value === '__new' ? '' : sel.value, position: Date.now() / 1000 }); const i2 = body.querySelector('#new-item'); if (i2) i2.focus(); } catch (x) { fail(x); }
+      try { await saveItem(ctx, null, { title: t, section: sel.value === '__new' ? '' : sel.value, position: Date.now() / 1000 }); const i2 = document.querySelector('#new-item'); if (i2) i2.focus(); } catch (x) { fail(x); }
     };
-    if (keepFocus) f.querySelector('#new-item').focus();
   }
-  const un = body.querySelector('#uncheck');
-  if (un) un.onclick = async () => { try { must(await sb.from('items').update({ done: false }).eq('owner_id', ctx.owner).eq('list', 'shopping').eq('done', true)); await ctx.reload(); } catch (e) { fail(e); } };
-  const pu = body.querySelector('#purge');
-  if (pu) { let armed = false; pu.onclick = async () => {
-    if (!armed) { armed = true; pu.textContent = 'ללחוץ שוב כדי למחוק'; setTimeout(() => { armed = false; pu.textContent = 'מחיקת מה שנקנה'; }, 3000); return; }
-    try { must(await sb.from('items').delete().eq('owner_id', ctx.owner).eq('list', 'shopping').eq('done', true)); await ctx.reload(); } catch (e) { fail(e); }
-  }; }
+  const un = box.querySelector('#uncheck');
+  if (un) un.onclick = async () => {
+    try { await Promise.all(ticked.map((r) => { const extra = { ...(r.extra || {}) }; delete extra.bought_at; delete extra.trip; return sb.from('items').update({ done: false, extra }).eq('id', r.id).then(must); })); await ctx.reload(); } catch (e) { fail(e); }
+  };
+  const fin = box.querySelector('#finish');
+  if (fin) fin.onclick = async () => {
+    const now = new Date().toISOString();
+    try {
+      await Promise.all(ticked.map((r) => { const b = (r.extra && r.extra.bought_at) || now; return sb.from('items').update({ extra: { ...(r.extra || {}), bought_at: b, trip: dayKey(b) } }).eq('id', r.id).then(must); }));
+      toast(left ? 'מה שנקנה עבר להיסטוריה. השאר נשאר ברשימה' : 'הקנייה נשמרה בהיסטוריה');
+      await ctx.reload();
+    } catch (e) { fail(e); }
+  };
+}
+
+function drawShopHistory(box, open, past, ctx) {
+  const groups = {};
+  past.forEach((r) => { (groups[tripOf(r)] = groups[tripOf(r)] || []).push(r); });
+  const keys = Object.keys(groups).sort((a, b) => (a === 'old') - (b === 'old') || (a < b ? 1 : -1));
+  if (!keys.length) { box.innerHTML = '<p class="empty">עוד אין היסטוריה. כל מה שתסמנו כנקנה יישמר כאן לפי תאריך הקנייה.</p>'; return; }
+  const onList = new Set(open.filter((r) => !r.done).map((r) => nameKey(r.title)));
+  box.innerHTML = '';
+  keys.forEach((k, i) => {
+    const items = groups[k].filter((r) => !isNote(r)), notes = groups[k].filter(isNote);
+    const d = document.createElement('details'); d.className = 'trip'; d.open = i === 0;
+    d.innerHTML = `<summary><b>${esc(dayLabel(k))}</b><small class="muted">${items.length} מצרכים</small></summary>`;
+    const groupsIn = [...new Set(groups[k].map((r) => (r.section || '').includes(' · ') ? r.section.split(' · ')[0] : ''))].filter(Boolean);
+    if (groupsIn.length) d.insertAdjacentHTML('beforeend', `<p class="hint">${groupsIn.map(esc).join(' · ')}</p>`);
+    if (notes.length) { const ul = document.createElement('ul'); ul.className = 'notes'; notes.forEach((n) => { const l = document.createElement('li'); l.innerHTML = mdInline(n.title); externalLinks(l); ul.append(l); }); d.append(ul); }
+    const ul = document.createElement('ul'); ul.className = 'tasks plain';
+    items.forEach((it) => {
+      const li = document.createElement('li');
+      const inList = onList.has(nameKey(it.title));
+      li.innerHTML = `<span class="it">${mdInline(it.title)}${lastSec(it.section) ? ` <small class="muted">${esc(lastSec(it.section))}</small>` : ''}</span>${ctx.editable ? (inList ? '<span class="pill">ברשימה</span>' : '<button type="button" class="readd" aria-label="להוסיף שוב לרשימה">+ שוב</button>') : ''}`;
+      const b = li.querySelector('.readd'); if (b) b.onclick = () => reAdd(ctx, it.title, it.section);
+      externalLinks(li); ul.append(li);
+    });
+    d.append(ul);
+    if (ctx.editable && items.length) {
+      const row = document.createElement('div'); row.className = 'row trip-actions';
+      row.innerHTML = '<button type="button" class="reset" data-all>להוסיף את כל הקנייה הזאת שוב</button>';
+      row.querySelector('[data-all]').onclick = async () => {
+        const todo = items.filter((it) => !onList.has(nameKey(it.title)));
+        if (!todo.length) return toast('הכול כבר ברשימה');
+        const now = Date.now() / 1000;
+        try { must(await sb.from('items').insert(todo.map((it, j) => ({ owner_id: ctx.owner, list: 'shopping', title: it.title, note: it.note || '', section: lastSec(it.section), position: now + j })))); toast(`נוספו ${todo.length} לרשימה`); await ctx.reload(); } catch (e) { fail(e); }
+      };
+      d.append(row);
+    }
+    box.append(d);
+  });
+}
+
+function drawShopAll(box, open, past, ctx) {
+  const map = new Map();
+  past.filter((r) => !isNote(r)).forEach((r) => {
+    const k = nameKey(r.title); if (!k) return;
+    const b = (r.extra && r.extra.bought_at) || r.updated_at || '';
+    const e = map.get(k) || { name: baseName(r.title), n: 0, last: '', section: '' };
+    e.n++; if (b >= e.last) { e.last = b; e.section = lastSec(r.section) || e.section; }
+    map.set(k, e);
+  });
+  const onList = new Set(open.filter((r) => !r.done).map((r) => nameKey(r.title)));
+  const all = [...map.entries()].sort((a, b) => b[1].n - a[1].n || a[1].name.localeCompare(b[1].name, 'he'));
+  const q = LS.get('shop-all-q', '');
+  box.innerHTML = all.length ? `<input type="search" id="all-q" class="search" placeholder="חיפוש במצרכים שקניתם (${all.length})" value="${esc(q)}" autocomplete="off"><ul class="tasks plain" id="all-list"></ul>`
+    : '<p class="empty">כאן יופיעו כל המצרכים שאי פעם קניתם, כדי להחזיר אותם לרשימה בלחיצה.</p>';
+  const ul = box.querySelector('#all-list'); if (!ul) return;
+  const paint = () => {
+    const s = (box.querySelector('#all-q').value || '').trim().toLowerCase();
+    ul.innerHTML = '';
+    all.filter(([k]) => !s || k.includes(s)).forEach(([k, e]) => {
+      const li = document.createElement('li');
+      const when = e.last && !isNaN(Date.parse(e.last)) ? `לאחרונה ${new Date(e.last).getDate()}.${new Date(e.last).getMonth() + 1}` : '';
+      li.innerHTML = `<span class="it">${esc(e.name)} <small class="muted">${[e.n > 1 ? `${e.n} פעמים` : '', when, e.section].filter(Boolean).map(esc).join(' · ')}</small></span>${ctx.editable ? (onList.has(k) ? '<span class="pill">ברשימה</span>' : '<button type="button" class="readd" aria-label="להוסיף לרשימה">+ לרשימה</button>') : ''}`;
+      const b = li.querySelector('.readd'); if (b) b.onclick = () => reAdd(ctx, e.name, e.section);
+      ul.append(li);
+    });
+    if (!ul.children.length) ul.innerHTML = '<li class="muted" style="padding:10px 14px">לא נמצא</li>';
+  };
+  box.querySelector('#all-q').oninput = (ev) => { LS.set('shop-all-q', ev.target.value); paint(); };
+  paint();
 }
 
 function linkHTML(url, label) { return url && /^https?:\/\//.test(url) ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : ''; }

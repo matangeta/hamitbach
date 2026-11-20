@@ -216,6 +216,21 @@ input:focus, select:focus, textarea.inp:focus { outline: 2px solid var(--basil);
 .icard.done b { text-decoration: line-through; color: var(--muted); }
 .icard .note p { margin: 0; }
 .tabs { display: flex; gap: 6px; margin: 6px 0 10px; }
+/* shopping history */
+.listpage ul.tasks.plain li { padding: 8px 14px; gap: 10px; }
+.listpage ul.tasks.plain .it { flex: 1; min-width: 0; }
+.readd { flex: none; border: 1px solid var(--basil); color: var(--basil); background: var(--card); border-radius: 999px; padding: 3px 12px; font-weight: 600; font-size: .9rem; }
+.readd:hover { background: var(--basil-soft); }
+.trip { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px 10px; margin: 0 0 10px; }
+.trip summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; padding: 8px 2px; list-style: none; }
+.trip summary::-webkit-details-marker { display: none; }
+.trip summary::before { content: '‹'; color: var(--muted); transition: transform .15s; display: inline-block; }
+.trip[open] summary::before { transform: rotate(-90deg); }
+.trip summary b { font-size: 1.05rem; }
+.listpage .trip ul.tasks { background: var(--bg); }
+.trip .hint { margin: 0 0 6px; }
+.trip .notes { margin-bottom: 8px !important; }
+.trip-actions { margin-top: 6px; }
 .share-group { display: grid; gap: 6px; }
 .share-group .who { font-weight: 700; }
 .pill { display: inline-block; font-size: .82rem; border-radius: 999px; padding: 1px 9px; background: var(--basil-soft); color: var(--basil); font-weight: 600; margin: 2px 0 2px 4px; }
@@ -233,10 +248,10 @@ input:focus, select:focus, textarea.inp:focus { outline: 2px solid var(--basil);
 </head>
 <body>
 <div id="app" dir="rtl" lang="he"><p class="loading">טוען…</p></div>
-<script src="config.js?v=1.4.0"></script>
-<script src="vendor/supabase.js?v=1.4.0"></script>
-<script src="vendor/marked.js?v=1.4.0"></script>
-<script src="vendor/purify.js?v=1.4.0"></script>
-<script src="app.js?v=1.4.0"></script>
+<script src="config.js?v=1.5.0"></script>
+<script src="vendor/supabase.js?v=1.5.0"></script>
+<script src="vendor/marked.js?v=1.5.0"></script>
+<script src="vendor/purify.js?v=1.5.0"></script>
+<script src="app.js?v=1.5.0"></script>
 </body>
 </html>
