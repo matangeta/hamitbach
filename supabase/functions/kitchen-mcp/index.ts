@@ -7,7 +7,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const FN_URL = `${SUPABASE_URL}/functions/v1/kitchen-mcp`;
 const APP_URL = 'https://matangeta.github.io/hamitbach/';
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const TAGS = ['קיטו', 'מנקנקת'];
 const TAG_HELP = 'Recipe tags: "קיטו" = keto / low-carb; "מנקנקת" = needs a sausage stuffer (filling casings: sausages, kabanos, salami, etc.).';
 
@@ -82,8 +82,8 @@ const TOOLS = [
   },
   {
     name: 'get_list',
-    description: 'Read one of the user\'s lists: shopping (רשימת קניות), wishlist (דברים שאני רוצה לקנות) or restaurants (מסעדות). Returns items with ids, sections and done state.',
-    inputSchema: { type: 'object', required: ['list'], properties: { list: { type: 'string', enum: LISTS }, include_done: { type: 'boolean', default: true }, ...ownerParam } },
+    description: 'Read one of the user\'s lists: shopping (רשימת קניות), wishlist (דברים שאני רוצה לקנות) or restaurants (מסעדות). Returns items with ids, sections and done state. For shopping, view picks what to read: "current" (default) = the open list only: what is still to buy plus what was ticked today; "history" = past purchases grouped by the day they were bought; "all_items" = every distinct item ever bought, with how many times and when last (use it to re-add regulars with add_items).',
+    inputSchema: { type: 'object', required: ['list'], properties: { list: { type: 'string', enum: LISTS }, view: { type: 'string', enum: ['current', 'history', 'all_items'], default: 'current', description: 'shopping only' }, include_done: { type: 'boolean', default: true, description: 'false = only items not done yet' }, ...ownerParam } },
     annotations: { readOnlyHint: true, title: 'קריאת רשימה' },
   },
   {
@@ -98,7 +98,7 @@ const TOOLS = [
   },
   {
     name: 'update_items',
-    description: 'Mark items done/undone (bought, visited) or change their fields. Use ids from get_list.',
+    description: 'Mark items done/undone (bought, visited) or change their fields. Use ids from get_list. A shopping item marked done stays on today\'s list until the day ends, then moves to the history by itself.',
     inputSchema: { type: 'object', required: ['items'], properties: { items: { type: 'array', items: { type: 'object', required: ['id'], properties: {
       id: { type: 'string' }, done: { type: 'boolean' }, title: { type: 'string' }, section: { type: 'string' }, note: { type: 'string' }, link: { type: 'string' },
       price: { type: 'string' }, cuisine: { type: 'string' }, area: { type: 'string' }, order: { type: 'string' }, rating: { type: 'string' } } } } } },
@@ -119,6 +119,11 @@ const normTags = (v: unknown): string[] => {
   return [];
 };
 const EXTRA_KEYS = ['price', 'cuisine', 'area', 'order', 'rating'];
+// shopping history: extra.bought_at = when ticked, extra.trip = day (YYYY-MM-DD) it moved to history or 'old'. Days in Israel time.
+const TZ = 'Asia/Jerusalem';
+const dayKey = (d: string | number | Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d));
+const tripOf = (r: any) => { if (!r.done) return ''; const x = r.extra || {}; if (x.trip) return x.trip; const b = x.bought_at || r.updated_at; if (!b) return 'old'; const d = dayKey(b); return d === dayKey(Date.now()) ? '' : d; };
+const baseName = (t: string) => (t || '').replace(/\*\*/g, '').replace(/\s*\([^)]*\)/g, '').split(/\s+[–—-]\s+/)[0].trim();
 type Ctx = { sb: SupabaseClient; uid: string };
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] });
 const errText = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true });
@@ -172,9 +177,33 @@ async function call(c: Ctx, name: string, a: any) {
     }
     case 'get_list': {
       const owner = await ownerId(c, a.owner_email);
-      let q = c.sb.from('items').select('id,section,title,note,link,extra,done').eq('owner_id', owner).eq('list', a.list).order('position').order('created_at');
-      if (a.include_done === false) q = q.eq('done', false);
-      const rows = must(await q) as any[];
+      let q = c.sb.from('items').select('id,section,title,note,link,extra,done,updated_at').eq('owner_id', owner).eq('list', a.list).order('position').order('created_at');
+      if (a.include_done === false && !(a.list === 'shopping' && a.view && a.view !== 'current')) q = q.eq('done', false);
+      let rows = must(await q) as any[];
+      if (a.list === 'shopping') {
+        const view = a.view || 'current';
+        if (view === 'history') {
+          const groups: Record<string, any[]> = {};
+          rows.filter((r) => tripOf(r)).forEach((r) => { (groups[tripOf(r)] ||= []).push(r); });
+          const keys = Object.keys(groups).sort((x, y) => Number(x === 'old') - Number(y === 'old') || (x < y ? 1 : -1));
+          if (!keys.length) return text('עוד אין היסטוריית קניות.');
+          return text('היסטוריית קניות:\n' + keys.map((k) => `## ${k === 'old' ? 'קניות קודמות' : k}\n` + groups[k].filter((r) => !r.extra?.note).map((r) => `- ${r.title}${r.section ? ` | ${r.section}` : ''}`).join('\n')).join('\n'));
+        }
+        if (view === 'all_items') {
+          const m = new Map<string, { name: string; n: number; last: string; section: string }>();
+          rows.filter((r) => tripOf(r) && !r.extra?.note).forEach((r) => {
+            const name = baseName(r.title); if (!name) return;
+            const b = r.extra?.bought_at || r.updated_at || ''; const e = m.get(name.toLowerCase()) || { name, n: 0, last: '', section: '' };
+            e.n++; if (b >= e.last) { e.last = b; e.section = (r.section || '').split(' · ').pop() || e.section; }
+            m.set(name.toLowerCase(), e);
+          });
+          const open = new Set(rows.filter((r) => !r.done).map((r) => baseName(r.title).toLowerCase()));
+          const all = [...m.entries()].sort((x, y) => y[1].n - x[1].n);
+          if (!all.length) return text('עוד לא נקנה כלום.');
+          return text('כל המצרכים שנקנו (פעמים | אחרון | קטגוריה):\n' + all.map(([k, e]) => `- ${e.name} | ${e.n} | ${e.last ? dayKey(e.last) : '-'} | ${e.section || '-'}${open.has(k) ? ' | כבר ברשימה' : ''}`).join('\n'));
+        }
+        rows = rows.filter((r) => tripOf(r) === '');
+      }
       if (!rows.length) return text(`${LIST_HE[a.list]}: ריקה.`);
       return text(`${LIST_HE[a.list]}:\n` + rows.map((r) => {
         const x = r.extra || {}; const bits = [r.section && `section: ${r.section}`, r.note && `note: ${r.note}`, r.link && `link: ${r.link}`,
@@ -199,9 +228,14 @@ async function call(c: Ctx, name: string, a: any) {
       for (const it of a.items || []) {
         const patch: any = {};
         for (const k of ['done', 'title', 'section', 'note', 'link']) if (it[k] !== undefined) patch[k] = it[k];
-        if (EXTRA_KEYS.some((k) => it[k] !== undefined)) {
-          const cur = must(await c.sb.from('items').select('extra').eq('id', it.id).maybeSingle()) as any;
-          patch.extra = { ...(cur?.extra || {}), ...Object.fromEntries(EXTRA_KEYS.filter((k) => it[k] !== undefined).map((k) => [k, it[k]])) };
+        if (EXTRA_KEYS.some((k) => it[k] !== undefined) || it.done !== undefined) {
+          const cur = must(await c.sb.from('items').select('extra,list,done').eq('id', it.id).maybeSingle()) as any;
+          const extra: any = { ...(cur?.extra || {}), ...Object.fromEntries(EXTRA_KEYS.filter((k) => it[k] !== undefined).map((k) => [k, it[k]])) };
+          if (cur?.list === 'shopping' && it.done !== undefined && it.done !== cur.done) {
+            extra.trip = undefined;
+            extra.bought_at = it.done ? new Date().toISOString() : undefined;
+          }
+          patch.extra = JSON.parse(JSON.stringify(extra));
         }
         const rows = must(await c.sb.from('items').update(patch).eq('id', it.id).select('id')) as any[];
         n += rows.length;
@@ -219,6 +253,7 @@ async function call(c: Ctx, name: string, a: any) {
 const INSTRUCTIONS = `This connects to "המטבח", the user's personal kitchen app (${APP_URL}): recipes, shopping list, wishlist and restaurants. Answer the user in Hebrew unless they write in another language.
 - When the user sends a recipe (text, screenshot, photo of a page, or a link), read it yourself, rewrite it cleanly in Hebrew in the required format, and call save_recipe once. Add tags when they fit: קיטו (keto) and מנקנקת (needs a sausage stuffer). Then reply with the title and the link.
 - "תוסיף לרשימה / צריך לקנות" -> add_items list=shopping; "קניתי" -> get_list then update_items done=true.
+- The shopping list is per shopping trip: get_list shopping shows only the open list (to buy + ticked today). Earlier purchases are in view="history" (by day) and view="all_items" (everything ever bought); to buy something again, add_items it.
 - To answer "what can I cook", use search_recipes and get_recipe.
 - Data shared by other users is reachable with owner_email.`;
 
