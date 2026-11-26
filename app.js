@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -281,6 +281,25 @@ function authView(mode = 'in', msg = '') {
   };
 }
 
+/* ---------- events: a big quick-link button at the bottom of the home screen ----------
+   Shown only to the account whose email hashes to `for` (sha-256, so no address sits in the code),
+   from today through `until` (Israel date). Add an entry per event; old ones can stay, they just stop showing. */
+const EVENTS = [
+  { title: 'ערב פיצה 🍕', sub: 'שישי 27.11 · אורחים ב־16:00 · לוח זמנים, פיצות ורטבים', url: 'https://claude.ai/artifact/KA7pukhraFSwjPKAuAT5sQ',
+    until: '2026-11-28', for: '3cf3ade97f520e0ab3e6e574b341c01e49e124be963d3fcc4716c734ff51e64a' },
+];
+const sha256 = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+async function eventButtons() {
+  try {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+    const live = EVENTS.filter((e) => today <= e.until);
+    if (!live.length || !S.user || !S.user.email || !crypto.subtle) return '';
+    const h = await sha256(S.user.email.trim().toLowerCase());
+    return live.filter((e) => e.for === h).map((e) =>
+      `<a class="event-btn" href="${esc(e.url)}" target="_blank" rel="noopener"><span><b>${esc(e.title)}</b><small>${esc(e.sub)}</small></span><span aria-hidden="true">←</span></a>`).join('');
+  } catch (e) { return ''; }
+}
+
 /* ---------- home ---------- */
 async function home() {
   document.title = 'המטבח';
@@ -302,7 +321,9 @@ async function home() {
       <a class="icon-btn" href="#/settings" aria-label="הגדרות">${ICONS.gear}</a></div>
       <p>מתכונים, קניות, משאלות ומסעדות. הכול במקום אחד.</p></header>
       <div id="banners"></div>
-      <nav class="tiles">${tiles.map(([h, k, t, sub, cls]) => `<a class="tile ${cls || ''}" href="${h}">${ICONS[k]}<span><b>${t}</b><small>${esc(sub) || '&nbsp;'}</small></span></a>`).join('')}</nav>`;
+      <nav class="tiles">${tiles.map(([h, k, t, sub, cls]) => `<a class="tile ${cls || ''}" href="${h}">${ICONS[k]}<span><b>${t}</b><small>${esc(sub) || '&nbsp;'}</small></span></a>`).join('')}</nav>
+      <div id="events"></div>`;
+    eventButtons().then((html) => { const box = $('#events'); if (box && html) { box.innerHTML = html; box.className = 'events'; } });
     installBanner($('#banners'));
     if (counts && counts.recipes === 0 && !LS.get('import-dismissed', false)) {
       const b = document.createElement('div'); b.className = 'banner';
