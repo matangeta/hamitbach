@@ -69,6 +69,13 @@ a { color: var(--basil); }
 .tile.main { grid-column: 1 / -1; background: var(--basil); border-color: var(--basil); color: var(--bg); }
 .tile.main svg { stroke: var(--bg); }
 .tile.main small { color: var(--bg); opacity: .85; }
+.events { position: sticky; bottom: 0; margin-top: 16px; padding-block: 10px max(10px, env(safe-area-inset-bottom, 0px)); background: linear-gradient(to bottom, transparent, var(--bg) 30%); display: grid; gap: 8px; }
+.event-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 14px 18px; border-radius: 18px; text-decoration: none;
+  background: var(--paprika); color: #fff; box-shadow: 0 4px 14px rgb(0 0 0 / .15); }
+.event-btn b { font-family: var(--font-display); font-weight: 400; font-size: 1.35rem; display: block; line-height: 1.2; }
+.event-btn small { opacity: .9; font-size: .92rem; }
+.event-btn > span:last-child { font-size: 1.4rem; }
+.event-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .page-title { font-size: 2rem; margin: 18px 0 8px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 4px 6px; }
 .chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 5px 14px; font-weight: 600; }
@@ -248,10 +255,10 @@ input:focus, select:focus, textarea.inp:focus { outline: 2px solid var(--basil);
 </head>
 <body>
 <div id="app" dir="rtl" lang="he"><p class="loading">טוען…</p></div>
-<script src="config.js?v=1.5.0"></script>
-<script src="vendor/supabase.js?v=1.5.0"></script>
-<script src="vendor/marked.js?v=1.5.0"></script>
-<script src="vendor/purify.js?v=1.5.0"></script>
-<script src="app.js?v=1.5.0"></script>
+<script src="config.js?v=1.6.0"></script>
+<script src="vendor/supabase.js?v=1.6.0"></script>
+<script src="vendor/marked.js?v=1.6.0"></script>
+<script src="vendor/purify.js?v=1.6.0"></script>
+<script src="app.js?v=1.6.0"></script>
 </body>
 </html>
