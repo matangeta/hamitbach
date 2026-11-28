@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const configured = /^https:\/\//.test(CFG.supabaseUrl || '') && CFG.supabaseKey && !/^__/.test(CFG.supabaseKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const APP_URL = location.origin + location.pathname;
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -487,11 +487,12 @@ async function recipeView(id) {
   const view = renderRecipeBody(r, {
     key: r.id,
     back: isGuide(r) ? '<a class="btn" href="#/guides">→ מדריכים</a>' : '<a class="btn" href="#/recipes">→ מתכונים</a>',
-    actions: `${editable ? `<a class="btn" href="#/r/${r.id}/edit">עריכה</a>` : ''}<button type="button" class="btn primary" id="share">שיתוף</button>`,
+    actions: `${editable ? `<a class="btn" href="#/r/${r.id}/edit">עריכה</a>` : ''}<button type="button" class="btn" id="pdf">PDF</button><button type="button" class="btn primary" id="share">שיתוף</button>`,
     note: mine ? '' : `<p class="ro-note" style="margin-top:10px">מתכון של ${esc(nameOf(r.owner_id))}. <button type="button" class="reset" id="copy-mine">שמירת עותק במתכונים שלי</button></p>`,
   });
   const cm = $('#copy-mine'); if (cm) cm.onclick = () => saveCopy(r);
   $('#share').onclick = () => shareRecipe(r, view);
+  $('#pdf').onclick = () => pdfRecipe(r, view);
   current.refresh = null;
 }
 async function saveCopy(r) {
@@ -513,11 +514,15 @@ function shareRecipe(r, view) {
     <section class="opt"><h3>שיתוף עם משתמש באפליקציה</h3>
       <p>כדי שמישהו יראה את כל המתכונים שלך בתוך האפליקציה, ויקבל גם כל מתכון חדש.</p>
       <div class="row"><a class="btn" href="#/share" data-close>לשיתוף עם משתמש</a></div></section>
+    <section class="opt"><h3>קובץ PDF</h3>
+      <p>עמוד מסודר להדפסה או לשליחה, עם הכמויות שמוצגות עכשיו.</p>
+      <div class="row"><button type="button" class="btn" id="to-pdf">יצירת PDF</button></div></section>
     <details class="opt"><summary>שיתוף כטקסט</summary>
       <p>עם הכמויות שמוצגות עכשיו.</p>
       <div class="row"><button type="button" class="btn" id="copy">העתקת הטקסט</button><a class="btn" id="wa" target="_blank" rel="noopener">שליחה בוואטסאפ</a></div></details>`);
   bg.querySelector('#wa').href = 'https://wa.me/?text=' + encodeURIComponent(text());
   bg.querySelector('#copy').onclick = () => copyText(text(), 'הטקסט הועתק');
+  bg.querySelector('#to-pdf').onclick = () => { bg.close(); pdfRecipe(r, view); };
   const pub = bg.querySelector('#pub');
   const drawPub = () => {
     if (r.public_token) {
@@ -535,6 +540,90 @@ function shareRecipe(r, view) {
   };
   drawPub();
 }
+/* ---------- PDF export ----------
+   Builds an off-screen A4 page from the recipe as shown (quantities already scaled), keeps lines and headings
+   from being cut between pages, renders each page with html2canvas and packs them with jsPDF. Rendering through
+   the browser keeps the Hebrew right-to-left text exactly as on screen. Both libraries load only on first use. */
+const loadScript = (src) => new Promise((ok, bad) => {
+  if (document.querySelector(`script[src="${src}"]`)) return ok();
+  const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => bad(new Error('לא הצלחתי לטעון את רכיב ה־PDF. בודקים חיבור לאינטרנט?')); document.head.append(s);
+});
+const PDF_W = 794, PDF_H = 1123, PDF_TOP = 52, PDF_BOT = 60, PDF_BODY = PDF_H - PDF_TOP - PDF_BOT;
+function pdfFileName(title) { return (title || 'מתכון').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) + '.pdf'; }
+function buildPdfPage(r, content, f) {
+  const page = document.createElement('div'); page.className = 'pdf-page'; page.dir = 'rtl'; page.lang = 'he';
+  const tags = (r.tags || []).map((t) => `<span class="badge">${esc(tagLabel(t))}</span>`).join(' ');
+  page.innerHTML = `<header class="pdf-head"><h1>${esc(r.title)}</h1>${tags || f !== 1 ? `<p class="pdf-meta">${tags}${f !== 1 ? `<span class="pdf-scaled">כמויות ${fmtFactor(f)} מהמתכון המקורי</span>` : ''}</p>` : ''}</header>`;
+  const body = content.cloneNode(true);
+  body.querySelectorAll('.q-edit').forEach((x) => x.remove());
+  body.querySelectorAll('a').forEach((a) => a.removeAttribute('target'));
+  body.querySelectorAll('ol[start]').forEach((ol) => { ol.style.counterReset = 'n ' + ((+ol.getAttribute('start') || 1) - 1); });
+  page.append(body);
+  return page;
+}
+// push any block that would straddle a page edge down to the next page; headings also keep 2 lines of what follows
+function paginate(page) {
+  const top0 = () => page.getBoundingClientRect().top;
+  const blocks = page.querySelectorAll('.pdf-head, h2, h3, h4, p, li, blockquote, hr, img, pre, .tbl, tr');
+  for (const el of blocks) {
+    if (el.tagName === 'TR' && el.closest('.tbl') && el.closest('.tbl').offsetHeight <= PDF_BODY * 0.5) continue;
+    for (let i = 0; i < 4; i++) {
+      const b = el.getBoundingClientRect(), t = b.top - top0(), h = b.height;
+      if (h > PDF_BODY * 0.5 && !/^H\d$/.test(el.tagName)) break;           // too tall to move whole: its children get handled
+      const need = /^H\d$/.test(el.tagName) ? h + 48 : h;
+      const edge = (Math.floor(t / PDF_BODY) + 1) * PDF_BODY;
+      if (t + need <= edge || t >= edge) break;
+      const push = edge - t + 2;
+      if (el.tagName === 'TR') [...el.children].forEach((c) => { c.style.paddingTop = (parseFloat(getComputedStyle(c).paddingTop) + push) + 'px'; });
+      else el.style.marginTop = (parseFloat(getComputedStyle(el).marginTop) + push) + 'px';
+    }
+  }
+  return Math.max(1, Math.ceil((page.scrollHeight - 1) / PDF_BODY));
+}
+async function makeRecipePdf(r, view) {
+  await Promise.all([loadScript('vendor/html2canvas.min.js'), loadScript('vendor/jspdf.min.js')]);
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  const page = buildPdfPage(r, view.content, view.factor());
+  const foot = document.createElement('div'); foot.className = 'pdf-page pdf-foot'; foot.style.left = '-20000px';
+  foot.textContent = 'המטבח · ' + new Date().toLocaleDateString('he-IL');
+  document.body.append(page, foot);
+  try {
+    const pages = paginate(page);
+    page.style.height = pages * PDF_BODY + 'px';
+    const scale = Math.min(2, Math.max(1.4, window.devicePixelRatio || 1));
+    const shot = (el, y, h) => html2canvas(el, { scale, backgroundColor: '#ffffff', useCORS: true, logging: false, scrollX: 0, scrollY: 0,
+      windowWidth: Math.max(document.documentElement.clientWidth, PDF_W + 40), y: el.getBoundingClientRect().top + window.scrollY + y, height: h });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'px', format: [PDF_W, PDF_H], hotfixes: ['px_scaling'], compress: true });
+    pdf.setProperties({ title: r.title, creator: 'המטבח' });
+    const footImg = (await shot(foot, 0, foot.offsetHeight)).toDataURL('image/png');
+    for (let i = 0; i < pages; i++) {
+      if (i) pdf.addPage([PDF_W, PDF_H]);
+      let c;
+      try { c = await shot(page, i * PDF_BODY, PDF_BODY); c.toDataURL('image/jpeg', 0.1); }
+      catch (e) { page.querySelectorAll('img').forEach((im) => im.remove()); c = await shot(page, i * PDF_BODY, PDF_BODY); } // a picture from another site blocks export: drop pictures
+      pdf.addImage(c.toDataURL('image/jpeg', 0.88), 'JPEG', 0, PDF_TOP, PDF_W, PDF_BODY, undefined, 'FAST');
+      pdf.addImage(footImg, 'PNG', 0, PDF_H - PDF_BOT + 18, PDF_W, foot.offsetHeight);
+      if (pages > 1) { pdf.setFontSize(10); pdf.setTextColor(95, 107, 97); pdf.text(`${i + 1} / ${pages}`, 60, PDF_H - PDF_BOT + 32); }
+    }
+    return new File([pdf.output('blob')], pdfFileName(r.title), { type: 'application/pdf' });
+  } finally { page.remove(); foot.remove(); }
+}
+function pdfRecipe(r, view) {
+  const bg = sheet('PDF של המתכון', `<p id="pdf-st">מכין את הקובץ…</p><div class="row" id="pdf-act" hidden></div>`);
+  const st = bg.querySelector('#pdf-st'), act = bg.querySelector('#pdf-act');
+  makeRecipePdf(r, view).then((file) => {
+    if (!bg.isConnected) return;
+    const url = URL.createObjectURL(file);
+    const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+    st.textContent = `הקובץ מוכן${view.factor() !== 1 ? `, עם הכמויות שמוצגות עכשיו (${fmtFactor(view.factor())})` : ''}.`;
+    act.innerHTML = `${canShare ? '<button type="button" class="btn primary" id="pdf-share">שליחה או שמירה</button>' : ''}
+      <a class="btn${canShare ? '' : ' primary'}" id="pdf-dl" href="${url}" download="${esc(file.name)}" target="_blank" rel="noopener">${canShare ? 'פתיחה' : 'הורדת הקובץ'}</a>`;
+    act.hidden = false;
+    const b = act.querySelector('#pdf-share');
+    if (b) b.onclick = async () => { try { await navigator.share({ files: [file], title: r.title }); } catch (e) { if (!e || e.name !== 'AbortError') act.querySelector('#pdf-dl').click(); } };
+  }).catch((e) => { if (bg.isConnected) { st.className = 'err'; st.textContent = 'לא הצלחתי להכין PDF: ' + (e && e.message ? e.message : e); } });
+}
 async function publicView(token) {
   app.innerHTML = '<p class="loading">טוען…</p>';
   current.refresh = null;
@@ -542,14 +631,15 @@ async function publicView(token) {
   try { r = (must(await sb.rpc('public_recipe', { token })) || [])[0]; } catch (e) {}
   if (!r) { app.innerHTML = `<div class="auth"><h1>${ICON_SVG} המטבח</h1><p class="empty">הקישור הזה כבר לא פעיל.</p><a class="btn primary" href="#/">לאפליקציה</a></div>`; return; }
   document.title = r.title;
-  renderRecipeBody(r, {
+  const view = renderRecipeBody(r, {
     key: 'p-' + token,
     back: `<a class="btn" href="#/">${S.user ? '→ המטבח שלי' : 'המטבח'}</a>`,
-    actions: S.user ? '<button type="button" class="btn primary" id="save">שמירה אצלי</button>' : '',
+    actions: '<button type="button" class="btn" id="pdf">PDF</button>' + (S.user ? '<button type="button" class="btn primary" id="save">שמירה אצלי</button>' : ''),
     note: r.owner_name ? `<p class="muted" style="margin:10px 0 0">מתכון ש${esc(r.owner_name)} שיתף/ה איתך</p>` : '',
     foot: S.user ? '' : '<div class="banner" style="margin-top:28px"><span>רוצים מקום אחד משלכם למתכונים, רשימת קניות ומסעדות?</span><span class="spacer"></span><a class="btn primary" href="#/">הרשמה בחינם</a></div>',
   });
   const s = $('#save'); if (s) s.onclick = () => saveCopy(r);
+  $('#pdf').onclick = () => pdfRecipe(r, view);
 }
 
 /* ---------- recipe editor ---------- */

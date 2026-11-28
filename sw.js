@@ -1,8 +1,8 @@
 // App shell: network first, cache fallback (fresh when online, opens offline). Supabase calls are never cached.
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const CACHE = 'hamitbach-' + VERSION;
 const SHELL = ['./', 'index.html', 'app.js', 'config.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',
-  'vendor/supabase.js', 'vendor/marked.js', 'vendor/purify.js'];
+  'vendor/supabase.js', 'vendor/marked.js', 'vendor/purify.js', 'vendor/html2canvas.min.js', 'vendor/jspdf.min.js'];
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); });
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {
