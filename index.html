@@ -176,6 +176,29 @@ details.opt > * + * { margin-top: 8px; }
 .sheet textarea { height: 30vh; }
 html, body { margin: 0; }
 body { -webkit-tap-highlight-color: transparent; }
+/* PDF export: an off-screen A4 page (794 css px wide), always light, rendered to canvas */
+.pdf-page { position: absolute; top: 0; left: -10000px; width: 794px; box-sizing: border-box; padding: 0 60px; direction: rtl;
+  --bg: #ffffff; --card: #ffffff; --ink: #1f2a22; --muted: #5f6b61; --line: #dde3d9; --basil: #2f6b46; --basil-soft: #eef5f0; --paprika: #b4441f; --paprika-soft: #fbe9e1;
+  background: #fff; color: var(--ink); font-family: var(--font-body); font-size: 15.5px; line-height: 1.55; color-scheme: light; }
+.pdf-page .pdf-head { border-bottom: 3px solid var(--basil); padding-bottom: 10px; margin-bottom: 6px; }
+.pdf-page h1 { font-size: 30px; margin: 0; color: var(--basil); }
+.pdf-page .pdf-meta { margin: 6px 0 0; color: var(--muted); font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pdf-page .pdf-scaled { color: var(--paprika); font-weight: 700; }
+.pdf-page .content h2 { font-size: 21px; margin: 18px 0 6px; color: var(--basil); }
+.pdf-page .content h3 { font-size: 17px; margin: 14px 0 4px; }
+.pdf-page .content p { margin: 6px 0; }
+.pdf-page .content hr { margin: 12px 0; }
+.pdf-page .content li { margin-block: 2px; }
+/* html2canvas draws native list markers on the wrong side in RTL, so draw them ourselves */
+.pdf-page .content ul, .pdf-page .content ol { list-style: none; padding-inline-start: 1.6em; }
+.pdf-page .content ol { counter-reset: n; }
+.pdf-page .content li { position: relative; }
+.pdf-page .content ol > li { counter-increment: n; }
+.pdf-page .content ul > li::before { content: "•"; position: absolute; right: -1.1em; color: var(--basil); font-weight: 700; }
+.pdf-page .content ol > li::before { content: counter(n) "."; position: absolute; right: -1.6em; width: 1.4em; text-align: left; color: var(--basil); font-weight: 700; }
+.pdf-page .ingr { border: 0; border-radius: 0; background: var(--basil-soft); padding: 2px 16px 4px; }
+.pdf-page .q { background: none; padding: 0; cursor: default; }
+.pdf-page.pdf-foot { color: var(--muted); font-size: 11px; text-align: right; }
 @media (prefers-reduced-motion: no-preference) { .sheet { animation: up .18s ease-out; } @keyframes up { from { transform: translateY(30px); opacity: .6; } } }
 
 /* app additions */
@@ -255,10 +278,10 @@ input:focus, select:focus, textarea.inp:focus { outline: 2px solid var(--basil);
 </head>
 <body>
 <div id="app" dir="rtl" lang="he"><p class="loading">טוען…</p></div>
-<script src="config.js?v=1.6.0"></script>
-<script src="vendor/supabase.js?v=1.6.0"></script>
-<script src="vendor/marked.js?v=1.6.0"></script>
-<script src="vendor/purify.js?v=1.6.0"></script>
-<script src="app.js?v=1.6.0"></script>
+<script src="config.js?v=1.7.0"></script>
+<script src="vendor/supabase.js?v=1.7.0"></script>
+<script src="vendor/marked.js?v=1.7.0"></script>
+<script src="vendor/purify.js?v=1.7.0"></script>
+<script src="app.js?v=1.7.0"></script>
 </body>
 </html>
